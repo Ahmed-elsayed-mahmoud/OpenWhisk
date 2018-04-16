@@ -129,19 +129,23 @@ class ShardingContainerPoolBalancer(config: WhiskConfig, controllerInstance: Ins
 
   /** 1. Publish a message to the loadbalancer */
   override def publish(action: ExecutableWhiskActionMetaData, msg: ActivationMessage)(
-    implicit transid: TransactionId): Future[Either[ActivationId, WhiskActivation]] = {
+    implicit transid: TransactionId): Future[Future[Either[ActivationId, WhiskActivation]]] = {
 
     val hash = ShardingContainerPoolBalancer.generateHash(msg.user.namespace, action.fullyQualifiedName(false))
     if (!overflowState.get()) {
-      sendToInvokerOrOverflow(msg, action, hash, action.exec.pull)
+      Future{
+        sendToInvokerOrOverflow(msg, action, hash, action.exec.pull)
+      }
     } else {
-      sendActivationToOverflow(
-        messageProducer,
-        OverflowMessage(transid, msg, action.limits.timeout.duration.toSeconds.toInt, hash, action.exec.pull, controllerInstance))
-        .flatMap { _ =>
-          val entry = setupActivation(action.limits.timeout.duration, msg.activationId, msg.user.uuid, None, transid)
-          entry.promise.future
-        }
+      Future{
+        sendActivationToOverflow(
+          messageProducer,
+          OverflowMessage(transid, msg, action.limits.timeout.duration.toSeconds.toInt, hash, action.exec.pull, controllerInstance))
+          .flatMap { _ =>
+            val entry = setupActivation(action.limits.timeout.duration, msg.activationId, msg.user.uuid, None, transid)
+            entry.promise.future
+          }
+      }
     }
   }
 
@@ -496,7 +500,8 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
         Some(invoker.id)
       } else {
         // If we've gone through all invokers
-        if (stepsDone == numInvokers + 1) {
+        // secheduling to a busy invoker during overflow processing
+        if (stepsDone == numInvokers + 1 && !overflow) {
           val healthyInvokers = invokers.filter(_.status == Healthy)
           if (healthyInvokers.nonEmpty) {
             // Choose a healthy invoker randomly

@@ -65,7 +65,7 @@ class ContainerPoolBalancer(config: WhiskConfig, controllerInstance: InstanceId)
   logging.info(this, s"blackboxFraction = $blackboxFraction")(TransactionId.loadbalancer)
 
   /** Feature switch for shared load balancer data **/
-  
+  logging.info(this, "hamada")
   private val loadBalancerData = {
     if (config.controllerLocalBookkeeping) {
       new LocalLoadBalancerData()
@@ -98,6 +98,12 @@ class ContainerPoolBalancer(config: WhiskConfig, controllerInstance: InstanceId)
       .ask(GetStatus)(Timeout(5.seconds))
       .mapTo[IndexedSeq[InvokerHealth]]
   }
+  invokerHealth().map{
+    invokers =>
+      allInvokersLocal = invokers
+      val nn = allInvokersLocal.size
+      logging.warn(this, s"allInvokersLocal: $nn  afterrrrrrrr")
+  }
 
   /**
    * Publishes activation message on internal bus for an invoker to pick up.
@@ -112,7 +118,7 @@ class ContainerPoolBalancer(config: WhiskConfig, controllerInstance: InstanceId)
    *         plus a grace period (see activeAckTimeoutGrace).
    */
   override def publish(action: ExecutableWhiskActionMetaData, msg: ActivationMessage)(
-    implicit transid: TransactionId): Future[Either[ActivationId, WhiskActivation]] = {
+    implicit transid: TransactionId): Future[Future[Either[ActivationId, WhiskActivation]]] = {
     /*
     chooseInvoker(msg.user, action).flatMap { invokerName =>
       val entry = setupActivation(action, msg.activationId, msg.user.uuid, invokerName, transid)
@@ -124,37 +130,42 @@ class ContainerPoolBalancer(config: WhiskConfig, controllerInstance: InstanceId)
     if (!overflowState.get()) {
       sendToInvokerOrOverflow(msg, action, hash, action.exec.pull)
     } else {
-      sendActivationToOverflow(
-        messageProducer,
-        OverflowMessage(transid, msg, action.limits.timeout.duration.toSeconds.toInt, hash, action.exec.pull, controllerInstance))
-        .flatMap { _ =>
-          val entry = setupActivation(action.limits.timeout.duration, msg.activationId, msg.user.uuid, None, transid)
-          entry.promise.future
-        }
+      invokerHealth().map{
+        _ =>
+        sendActivationToOverflow(
+          messageProducer,
+          OverflowMessage(transid, msg, action.limits.timeout.duration.toSeconds.toInt, hash, action.exec.pull, controllerInstance))
+          .flatMap { _ =>
+            val entry = setupActivation(action.limits.timeout.duration, msg.activationId, msg.user.uuid, None, transid)
+            entry.promise.future
+          }
+      }
     }
   }
 
   private def sendToInvokerOrOverflow(msg: ActivationMessage, action: ExecutableWhiskActionMetaData, hash: Int, pull: Boolean)(
-    implicit transid: TransactionId): Future[Either[ActivationId, WhiskActivation]] = {
-    val invMatched = chooseInvoker(hash, pull, false)
-    val entry = setupActivation(action.limits.timeout.duration, msg.activationId, msg.user.uuid, invMatched, transid)
+    implicit transid: TransactionId): Future[Future[Either[ActivationId, WhiskActivation]]] = {
+    chooseInvoker(hash, pull, false).map{
+      invMatched =>
+      val entry = setupActivation(action.limits.timeout.duration, msg.activationId, msg.user.uuid, invMatched, transid)
 
-    invMatched match {
-      case Some(i) =>
-        ContainerPoolBalancer.sendActivationToInvoker(messageProducer, msg, i).flatMap { _ =>
-          entry.promise.future
-        }
-      case None =>
-        if (overflowState.compareAndSet(false, true)) {
-          logging.info(this, "entering overflow state; no invokers have capacity")
-        }
-
-        sendActivationToOverflow(
-          messageProducer,
-          OverflowMessage(transid, msg, action.limits.timeout.duration.toSeconds.toInt, hash, pull, controllerInstance)).flatMap {
-          _ =>
+      invMatched match {
+        case Some(i) =>
+          ContainerPoolBalancer.sendActivationToInvoker(messageProducer, msg, i).flatMap { _ =>
             entry.promise.future
-        }
+          }
+        case None =>
+          if (overflowState.compareAndSet(false, true)) {
+            logging.info(this, "entering overflow state; no invokers have capacity")
+          }
+
+          sendActivationToOverflow(
+            messageProducer,
+            OverflowMessage(transid, msg, action.limits.timeout.duration.toSeconds.toInt, hash, pull, controllerInstance)).flatMap {
+            _ =>
+              entry.promise.future
+          }
+      }
     }
   }
 
@@ -354,34 +365,37 @@ class ContainerPoolBalancer(config: WhiskConfig, controllerInstance: InstanceId)
           .removeActivation(m.msg.activationId)
 
         //process the activation request: update the invoker ref, and send to invoker
-        chooseInvoker(m.hash, m.pull, true) match {
-          case Some(instanceId) =>
-            //Update the invoker name for the overflow ActivationEntry
-            //The timeout for the activationId will still be effective.
-            entryOption match {
-              case Some(entry) =>
-                entry.invokerName = Some(instanceId)
-                loadBalancerData.putActivation(m.msg.activationId, entry, false)
-                ContainerPoolBalancer.sendActivationToInvoker(messageProducer, m.msg, instanceId)
-              case None =>
-                //TODO: adjust the timeout for time spent in overflow topic!
-                val entry = setupActivation(
-                  m.actionTimeoutSeconds.seconds,
-                  m.msg.activationId,
-                  m.msg.user.uuid,
-                  Some(instanceId),
-                  m.msg.transid,
-                  Some(m.originalController),
-                  true)
-                loadBalancerData.putActivation(m.msg.activationId, entry, true)
-                val updatedMsg = m.msg.copy(rootControllerIndex = this.controllerInstance)
-                ContainerPoolBalancer.sendActivationToInvoker(messageProducer, updatedMsg, instanceId)
-            }
+        chooseInvoker(m.hash, m.pull, true).map{
+          invMatched =>
+          invMatched match {
+            case Some(instanceId) =>
+              //Update the invoker name for the overflow ActivationEntry
+              //The timeout for the activationId will still be effective.
+              entryOption match {
+                case Some(entry) =>
+                  entry.invokerName = Some(instanceId)
+                  loadBalancerData.putActivation(m.msg.activationId, entry, false)
+                  ContainerPoolBalancer.sendActivationToInvoker(messageProducer, m.msg, instanceId)
+                case None =>
+                  //TODO: adjust the timeout for time spent in overflow topic!
+                  val entry = setupActivation(
+                    m.actionTimeoutSeconds.seconds,
+                    m.msg.activationId,
+                    m.msg.user.uuid,
+                    Some(instanceId),
+                    m.msg.transid,
+                    Some(m.originalController),
+                    true)
+                  loadBalancerData.putActivation(m.msg.activationId, entry, true)
+                  val updatedMsg = m.msg.copy(rootControllerIndex = this.controllerInstance)
+                  ContainerPoolBalancer.sendActivationToInvoker(messageProducer, updatedMsg, instanceId)
+              }
 
-          case None =>
-            //if no invokers available, all activations will go to overflow queue till capacity is available again
-            logging.error(this, "invalid overflow processing; no invokers have capacity")
-          //TODO: should requeue to overflow?
+            case None =>
+              //if no invokers available, all activations will go to overflow queue till capacity is available again
+              logging.error(this, "invalid overflow processing; no invokers have capacity")
+            //TODO: should requeue to overflow?
+          }
         }
         overflowFeed ! MessageFeed.Processed
 
@@ -409,15 +423,50 @@ class ContainerPoolBalancer(config: WhiskConfig, controllerInstance: InstanceId)
   }
 
   /** Determine which invoker this activation should go to. Due to dynamic conditions, it may return no invoker. */
-  private def chooseInvoker(hash: Int, pull: Boolean, overflow: Boolean): Option[InstanceId] = {
-    
-    val invokersToUse = if (pull) blackboxInvokers(allInvokersLocal) else managedInvokers(allInvokersLocal)
-    val currentActivations = loadBalancerData.activationCountPerInvoker
-    val invokersWithUsage = invokersToUse.view.map {
-      // Using a view defers the comparably expensive lookup to actual access of the element
-      case invoker => (invoker.id, invoker.status, currentActivations.getOrElse(invoker.id.toString, 0))
+  private def chooseInvoker(hash: Int, pull: Boolean, overflow: Boolean): Future[Option[InstanceId]] = {
+    /*loadBalancerData.activationCountPerInvoker.flatMap { currentActivations =>
+      invokerHealth().flatMap { invokers =>
+        //val invokersToUse = if (pull) blackboxInvokers(allInvokersLocal) else managedInvokers(allInvokersLocal)
+        //val currentActivations = loadBalancerData.activationCountPerInvoker
+        //val invokersWithUsage = invokersToUse.view.map {
+        val invokersToUse = if (pull) blackboxInvokers(invokers) else managedInvokers(invokers)
+        val invokersWithUsage = invokersToUse.view.map {
+          // Using a view defers the comparably expensive lookup to actual access of the element
+          case invoker => (invoker.id, invoker.status, currentActivations.getOrElse(invoker.id.toString, 0))
+        }
+        val n1 = invokersToUse.size
+        val n2 = invokersWithUsage.size
+        logging.warn(this, s"invokersToUse: $n1,   invokersWithUsage:  $n2")
+        ContainerPoolBalancer.schedule(invokersWithUsage, config.loadbalancerInvokerBusyThreshold, hash, overflow)
+      }
     }
-    ContainerPoolBalancer.schedule(invokersWithUsage, config.loadbalancerInvokerBusyThreshold, hash, overflow)
+    
+    invokerHealth().onComplete({
+      case Success(invokers) => {
+        allInvokersLocal = invokers
+        val nn = allInvokersLocal.size
+        logging.warn(this, s"allInvokersLocal: $nn  afterrrrrrrr")
+      }
+      case Failure(exception) => {
+        //Do something with my error
+      }
+    })*/
+    invokerHealth().map{
+      invokers =>
+
+        val invokersToUse = if (pull) blackboxInvokers(invokers) else managedInvokers(invokers)
+        val currentActivations = loadBalancerData.activationCountPerInvoker
+        val invokersWithUsage = invokersToUse.view.map {
+        //val invokersToUse = if (pull) blackboxInvokers(invokers) else managedInvokers(invokers)
+        //val invokersWithUsage = invokersToUse.view.map {
+          // Using a view defers the comparably expensive lookup to actual access of the element
+          case invoker => (invoker.id, invoker.status, currentActivations.getOrElse(invoker.id.toString, 0))
+        }
+        val n1 = invokersToUse.size
+        val n2 = invokersWithUsage.size
+        logging.warn(this, s"invokersToUse: $n1,   invokersWithUsage:  $n2")
+        ContainerPoolBalancer.schedule(invokersWithUsage, config.loadbalancerInvokerBusyThreshold, hash, overflow)
+    }
   }
 
   /** Generates a hash based on the string representation of namespace and action */

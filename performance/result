@@ -1,0 +1,34 @@
+/************************************ throughput ************************************/
+Running 2m test @ http://172.17.0.1:10001/api/v1/namespaces/_/actions/noopThroughput?blocking=true
+  2 threads and 4 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   143.61ms  283.16ms   5.00s    98.22%
+    Req/Sec    18.66      8.26    50.00     44.84%
+  Latency Distribution
+     50%   95.28ms
+     75%  147.97ms
+     90%  239.82ms
+     99%  559.60ms
+  4224 requests in 2.00m, 2.78MB read
+Requests/sec:     35.19
+Transfer/sec:     23.75KB
+
+
+/************************************ latency ************************************/
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO Target URL:          http://172.17.0.1:10001/api/v1/namespaces/_/actions/noopLatency?blocking=true
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO Max requests:        10000
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO Concurrency level:   1
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO Agent:               keepalive
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO 
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO Completed requests:  10000
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO Total errors:        0
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO Total time:          449.443896242 s
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO Requests per second: 22
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO Mean latency:        44.8 ms
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO 
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO Percentage of the requests served within a certain time
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO   50%      33 ms
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO   90%      79 ms
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO   95%      97 ms
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO   99%      137 ms
+[Sat Mar 24 2018 20:54:46 GMT+0000 (UTC)] INFO  100%      267 ms (longest request)

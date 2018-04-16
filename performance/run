@@ -1,0 +1,20 @@
+# Host to use. Needs to include the protocol.
+# Credentials to use for the test. USER:PASS format.
+# concurrency level of the throughput test: How many requests should open in parallel.
+# How many threads to utilize, directly correlates to the number of CPU cores
+# How long to run the test
+
+./throughput.sh "http://172.17.0.1:10001" "$(cat ~/openwhisk/ansible/files/auth.guest)" 4 2 2m
+
+#################################################################################################
+
+# Host to use. Needs to include the protocol.
+# Credentials to use for the test. USER:PASS format.
+# How many samples to create by the test. Default: 10000
+
+./latency.sh "http://172.17.0.1:10001" "$(cat ~/openwhisk/ansible/files/auth.guest)" 10000
+
+##################################################################################################
+
+cd ~/.openwhisk/ansible/tmp/wsklogs
+
