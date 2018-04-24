@@ -1,3 +1,7 @@
 function main() {
-    return {payload: 'Hello Hamadaaaaaa'};
+	var stop = new Date().getTime();
+    while(new Date().getTime() < stop + 10000) {
+        ;
+    }
+    return {payload: 'Helo Hamadaaaaaa'};
 }
